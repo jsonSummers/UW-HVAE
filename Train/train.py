@@ -30,10 +30,11 @@ from torchvision.transforms import ToTensor
 current_dir = os.path.dirname(os.path.realpath(__file__))
 parent_dir = os.path.dirname(current_dir)
 sys.path.append(parent_dir)
-dataset_path = os.path.join(os.getcwd(), '...', '..', 'Data', 'Paired')
+dataset_path = os.path.join(os.getcwd(), '..', '..', 'Data', 'Paired')
+print(f"Dataset path: {dataset_path}")
 
-from Model.model import HVAE  # Importing your HVAE model
-from Model.model_config import ModelConfig
+from Model.model import HierarchicalVAE
+from Model.model_config import model_config
 from Utils.loss import make_objective_function
 from Utils.dataloader import GetTrainingPairs
 
@@ -52,12 +53,13 @@ num_evaluation_pairs = 5
 num_epochs = 10
 
 
+
+
 def initialize_models(learning_rate, patience=5):
-    model_config = ModelConfig()
-    enhancer = HVAE(model_config).to(device)
-    optimizer = optim.Adam(enhancer.parameters(), lr=learning_rate)
+    model = HierarchicalVAE(model_config).to(device)
+    optimizer = optim.Adam(model.parameters(), lr=learning_rate)
     scheduler = ReduceLROnPlateau(optimizer, mode='min', factor=0.1, patience=patience, verbose=True)
-    return scheduler, enhancer, optimizer
+    return scheduler, model, optimizer
 
 
 def initialize_data_loader():
@@ -93,9 +95,9 @@ def make_directories(experiment_id):
     return save_path
 
 
-def save_evaluation_images(eval_input_images, eval_output_images, enhancer, save_path, seed, epoch):
+def save_evaluation_images(eval_input_images, eval_output_images, model, save_path, seed, epoch):
     with torch.no_grad():
-        enhanced_samples, _, _ = enhancer(eval_input_images)
+        enhanced_samples, _, _ = model(eval_input_images)
 
         # Concatenate along dimension 3
         side_by_side = torch.cat([eval_input_images.cpu(), eval_output_images.cpu(), enhanced_samples.cpu()], dim=3)
@@ -105,19 +107,31 @@ def save_evaluation_images(eval_input_images, eval_output_images, enhancer, save
                    normalize=False)
 
 
-def train(model, train_loader, objective_function, optimizer, scheduler, device):
+def train(model, train_loader, optimizer, device, objective_function):
     model.train()
     running_loss = 0.0
+    kl_loss_val = 0.0
+    l1_loss_val = 0.0
+    con_loss_val = 0.0
+
     for batch_idx, data in enumerate(train_loader):
-        inputs, targets = data['input'].to(device), data['target'].to(device)
+        inputs, targets = data['input_rgb'].to(device), data['target_rgb'].to(device)
 
         optimizer.zero_grad()
 
-        outputs, delta_mu, delta_logvar = model(inputs)
-        kl_loss_val, l1_loss_val, con_loss_val = objective_function(outputs, inputs, delta_mu, delta_logvar)
+        # Forward pass
+        outputs, mu, logvar = model(inputs)
 
+        # Calculate losses
+        kl_loss_val, l1_loss_val, con_loss_val = objective_function(outputs, inputs, mu, logvar)
+
+        # Total loss
         total_loss = kl_loss_val + l1_loss_val + con_loss_val
+
+        # Backward pass
         total_loss.backward()
+
+        # Update weights
         optimizer.step()
 
         running_loss += total_loss.item()
@@ -128,7 +142,7 @@ def train(model, train_loader, objective_function, optimizer, scheduler, device)
 def main(args):
 
     # Initialize models
-    scheduler, enhancer, optimizer = initialize_models(args.lr, args.patience)
+    scheduler, model, optimizer = initialize_models(args.lr, args.patience)
     print("Models initialized")
 
     Objective_function = make_objective_function(device, args.use_vgg, args.lambda_kl, args.lambda_l1, args.lambda_con)
@@ -146,7 +160,7 @@ def main(args):
     # Training loop
     print("Training started")
     for epoch in range(num_epochs):
-        train_loss, kl_loss_val, l1_loss_val, con_loss_val = train(enhancer, train_loader, Objective_function, optimizer, scheduler, device)
+        train_loss, kl_loss_val, l1_loss_val, con_loss_val = train(model, train_loader, optimizer, device, Objective_function)
 
         # Adjust learning rate based on validation loss
         scheduler.step(train_loss)
@@ -157,9 +171,10 @@ def main(args):
         writer.add_scalar('Content Loss', con_loss_val.item(), epoch * len(train_loader) + i)
         # Print training statistics
         print(f'Epoch [{epoch + 1}/{args.num_epochs}], Loss: {train_loss:.4f}')
+        save_evaluation_images(eval_input_images, eval_output_images, model, save_path, seed, epoch)
 
     # Save trained model
-    torch.save(enhancer.state_dict(), args.save_path)
+    torch.save(model.state_dict(), args.save_path)
 
 
 if __name__ == '__main__':

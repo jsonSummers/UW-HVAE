@@ -1,15 +1,11 @@
 # model_config.py
 
-class ModelConfig:
-    def __init__(self):
-        # Encoder parameters
-        self.num_encoder_layers = 4
-        self.encoder_channels = [64, 128, 256, 512]  # Number of channels in each encoder layer
-
-        # Decoder parameters
-        self.num_decoder_layers = 4
-        self.decoder_channels = [256, 128, 64, 32]  # Number of channels in each decoder layer
-
-        # Input image parameters
-        self.input_channels = 3  # RGB channels
-        self.image_size = 256  # Input image size (assumed to be square)
+model_config = {
+    'in_channels': 3,
+    'out_channels': 3,  # Assuming RGB images
+    'latent_dim': 128,  # Latent space dimension
+    'num_encoder_blocks': 4,  # Number of encoder blocks
+    'encoder_channels': [32, 64, 128, 256],  # Encoder block channels
+    'num_decoder_blocks': 4,  # Number of decoder blocks
+    'decoder_channels': [128, 64, 32, 16],  # Decoder block channels
+}

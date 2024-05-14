@@ -2,63 +2,65 @@
 
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 
-class ConvBlock(nn.Module):
-    def __init__(self, in_channels, out_channels, kernel_size, stride=1, padding=0):
-        super(ConvBlock, self).__init__()
-        self.conv = nn.Conv2d(in_channels, out_channels, kernel_size, stride=stride, padding=padding)
+
+class Swish(nn.Module):
+    def forward(self, x):
+        return x * torch.sigmoid(x)
+
+
+class ResidualCell(nn.Module):
+    def __init__(self, in_channels, out_channels, stride=1):
+        super(ResidualCell, self).__init__()
+
+        self.conv1 = nn.Conv2d(in_channels, out_channels, kernel_size=3, stride=stride, padding=1, bias=False)
+        self.bn1 = nn.BatchNorm2d(out_channels)
+        self.swish = Swish()
+        self.conv2 = nn.Conv2d(out_channels, out_channels, kernel_size=3, stride=1, padding=1, bias=False)
+        self.bn2 = nn.BatchNorm2d(out_channels)
+
+        self.shortcut = nn.Sequential()
+        if stride != 1 or in_channels != out_channels:
+            self.shortcut = nn.Sequential(
+                nn.Conv2d(in_channels, out_channels, kernel_size=1, stride=stride, bias=False),
+                nn.BatchNorm2d(out_channels)
+            )
+
+    def forward(self, x):
+        out = self.conv1(x)
+        out = self.bn1(out)
+        out = self.swish(out)
+        out = self.conv2(out)
+        out = self.bn2(out)
+        out += self.shortcut(x)
+        out = self.swish(out)
+        return out
+
+
+class EncoderBlock(nn.Module):
+    def __init__(self, in_channels, out_channels, stride=1):
+        super(EncoderBlock, self).__init__()
+        self.conv = nn.Conv2d(in_channels, out_channels, kernel_size=4, stride=stride, padding=1)
         self.bn = nn.BatchNorm2d(out_channels)
-        self.activation = nn.SiLU()  # Swish activation function
+        self.swish = Swish()
 
     def forward(self, x):
         x = self.conv(x)
         x = self.bn(x)
-        x = self.activation(x)
+        x = self.swish(x)
         return x
 
-class DepthwiseSeparableConvBlock(nn.Module):
-    def __init__(self, in_channels, out_channels, kernel_size, stride=1, padding=0):
-        super(DepthwiseSeparableConvBlock, self).__init__()
-        self.depthwise_conv = nn.Conv2d(in_channels, in_channels, kernel_size, stride=stride, padding=padding, groups=in_channels)
-        self.pointwise_conv = nn.Conv2d(in_channels, out_channels, 1)
+
+class DecoderBlock(nn.Module):
+    def __init__(self, in_channels, out_channels, stride=1):
+        super(DecoderBlock, self).__init__()
+        self.deconv = nn.ConvTranspose2d(in_channels, out_channels, kernel_size=4, stride=stride, padding=1)
         self.bn = nn.BatchNorm2d(out_channels)
-        self.activation = nn.SiLU()
+        self.swish = Swish()
 
     def forward(self, x):
-        x = self.depthwise_conv(x)
-        x = self.pointwise_conv(x)
+        x = self.deconv(x)
         x = self.bn(x)
-        x = self.activation(x)
-        return x
-
-class SqueezeExcitation(nn.Module):
-    def __init__(self, channels, reduction=16):
-        super(SqueezeExcitation, self).__init__()
-        self.se = nn.Sequential(
-            nn.AdaptiveAvgPool2d(1),
-            nn.Conv2d(channels, channels // reduction, 1),
-            nn.SiLU(),
-            nn.Conv2d(channels // reduction, channels, 1),
-            nn.Sigmoid()
-        )
-
-    def forward(self, x):
-        return x * self.se(x)
-
-class ResidualCell(nn.Module):
-    def __init__(self, in_channels, out_channels, kernel_size, stride=1, padding=0, use_se=True):
-        super(ResidualCell, self).__init__()
-        self.conv1 = ConvBlock(in_channels, out_channels, kernel_size, stride, padding)
-        self.conv2 = ConvBlock(out_channels, out_channels, kernel_size, stride, padding)
-        self.use_se = use_se
-        if use_se:
-            self.se = SqueezeExcitation(out_channels)
-
-    def forward(self, x):
-        identity = x
-        x = self.conv1(x)
-        x = self.conv2(x)
-        if self.use_se:
-            x = self.se(x)
-        x += identity
+        x = self.swish(x)
         return x

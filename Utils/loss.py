@@ -20,7 +20,7 @@ def make_objective_function(device, use_vgg, lambda_kl, lambda_l1, lambda_con):
 
     def Loss(enhanced_images, target_images, mu, logvar):
         # KL divergence loss
-        kl_loss_val = lambda_kl * torch.mean(kl_loss(mu, logvar))
+        kl_loss_val = lambda_kl * kl_loss(mu, logvar)
 
         # Calculate reconstruction loss
         l1_loss_val = lambda_l1 * l1_loss(enhanced_images, target_images)
